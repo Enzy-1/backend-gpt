@@ -4,43 +4,19 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Configurar OpenAI con manejo de errores mejorado
 let openai;
 try {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    throw new Error('La variable de entorno OPENAI_API_KEY no está definida')
+    throw new Error('La variable de entorno OPENAI_API_KEY no está definida');
   }
-
   openai = new OpenAI({ apiKey });
   console.log('✅ OpenAI configurado correctamente');
 } catch (error) {
   console.error('Error al inicializar OpenAI:', error);
 }
 
-// Generar respuesta de ChatGPT
-export const generateChatResponse = async (req, res) => {
-  try {
-    const { prompt } = req.body;
-
-    if (!prompt) {
-      return res.status(400).json({ error: 'El prompt es requerido' });
-    }
-
-    if (!openai) {
-      return res.status(500).json({ 
-        error: 'No se ha configurado correctamente la API de OpenAI',
-        message: 'Error interno del servidor al configurar OpenAI'
-      });
-    }
-
-    // Llamada a la API de OpenAI con modelo gpt-4o para respuestas más avanzadas
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
- {
-  role: "system",
-  content: `
+const SYSTEM_PROMPT = `
 🎀 Nombre del agente: Clara
 💼 Rol: Asistente virtual para agendar citas románticas y facilitar una experiencia de citas virtuales realistas
 💬 Canales de uso: WhatsApp, Webchat, App, Correo electrónico, SMS
@@ -117,40 +93,85 @@ No haces recomendaciones personales fuera del proceso.
 No usas jerga técnica ni lenguaje ambiguo.
 No continúas sin confirmación explícita de los datos clave.
 Siempre finalizas con despedidas amables y mantienes la naturalidad y realismo en la conversación.
-  `
-},
+`;
 
-        { role: "user", content: prompt }
-      ],
-      max_tokens: 300, // Limitar tokens para respuestas más cortas
-      temperature: 0.7, // Mantener algo de creatividad
+export const generateChatResponse = async (req, res) => {
+  try {
+    const { prompt, userId } = req.body;
+
+    if (!prompt || !userId) {
+      return res.status(400).json({ error: 'El prompt y userId son requeridos' });
+    }
+
+    if (!openai) {
+      return res.status(500).json({ 
+        error: 'No se ha configurado correctamente la API de OpenAI',
+        message: 'Error interno del servidor al configurar OpenAI'
+      });
+    }
+
+    // Buscar conversación existente
+    let conversation = await Conversation.findOne({ userId });
+
+    if (!conversation) {
+      // Crear nueva conversación con mensaje system al inicio
+      conversation = new Conversation({
+        userId,
+        messages: [
+          {
+            role: 'system',
+            content: SYSTEM_PROMPT,
+          },
+        ],
+      });
+    }
+
+    // Agregar nuevo mensaje del usuario
+    conversation.messages.push({ role: 'user', content: prompt });
+
+    // Mantener solo últimos 10 mensajes para no saturar la petición
+    const messagesToSend = conversation.messages.slice(-10);
+
+    // Llamar a OpenAI con el contexto completo
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: messagesToSend,
+      max_tokens: 300,
+      temperature: 0.7,
     });
 
     const response = completion.choices[0].message.content;
 
-    // Guardar la conversación en la base de datos
-    const conversation = new Conversation({
-      prompt,
-      response,
-    });
+    // Agregar respuesta al historial
+    conversation.messages.push({ role: 'assistant', content: response });
 
+    // Guardar conversación actualizada
     await conversation.save();
 
     res.json({ response });
   } catch (error) {
     console.error('Error al generar la respuesta:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Error al procesar la solicitud',
-      details: error.message 
+      details: error.message,
     });
   }
 };
 
-// Obtener historial de conversaciones
+// Obtener historial simple (opcional)
 export const getConversationHistory = async (req, res) => {
   try {
-    const conversations = await Conversation.find().sort({ createdAt: -1 }).limit(10);
-    res.json(conversations);
+    const { userId } = req.query;
+    if (!userId) {
+      return res.status(400).json({ error: 'El userId es requerido' });
+    }
+
+    const conversation = await Conversation.findOne({ userId });
+    if (!conversation) {
+      return res.status(404).json({ error: 'No se encontró conversación para este usuario' });
+    }
+
+    res.json(conversation.messages);
   } catch (error) {
     console.error('Error al obtener el historial:', error);
     res.status(500).json({ error: 'Error al obtener el historial de conversaciones' });
