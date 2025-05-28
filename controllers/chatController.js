@@ -21,10 +21,10 @@ try {
 // Generar respuesta de ChatGPT
 export const generateChatResponse = async (req, res) => {
   try {
-    const { prompt, userId } = req.body;
+    const { prompt } = req.body;
 
-    if (!prompt || !userId) {
-      return res.status(400).json({ error: 'El prompt y userId son requeridos' });
+    if (!prompt) {
+      return res.status(400).json({ error: 'El prompt es requerido' });
     }
 
     if (!openai) {
@@ -34,16 +34,13 @@ export const generateChatResponse = async (req, res) => {
       });
     }
 
-    // Obtener historial de conversaciones anteriores del usuario
-    const previousConversations = await Conversation.find({ userId })
-      .sort({ createdAt: 1 })
-      .limit(10);
-
-    // Construir historial de mensajes
-    const messages = [
-      {
-        role: "system",
-        content: `
+    // Llamada a la API de OpenAI con modelo gpt-4o para respuestas más avanzadas
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+ {
+  role: "system",
+  content: `
 🎀 Nombre del agente: Clara
 💼 Rol: Asistente virtual para agendar citas románticas y facilitar una experiencia de citas virtuales realistas
 💬 Canales de uso: WhatsApp, Webchat, App, Correo electrónico, SMS
@@ -120,27 +117,19 @@ No haces recomendaciones personales fuera del proceso.
 No usas jerga técnica ni lenguaje ambiguo.
 No continúas sin confirmación explícita de los datos clave.
 Siempre finalizas con despedidas amables y mantienes la naturalidad y realismo en la conversación.
-        `
-      },
-      ...previousConversations.flatMap((conv) => [
-        { role: "user", content: conv.prompt },
-        { role: "assistant", content: conv.response }
-      ]),
-      { role: "user", content: prompt }
-    ];
+  `
+},
 
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: messages,
-      max_tokens: 300,
-      temperature: 0.7,
+        { role: "user", content: prompt }
+      ],
+      max_tokens: 300, // Limitar tokens para respuestas más cortas
+      temperature: 0.7, // Mantener algo de creatividad
     });
 
     const response = completion.choices[0].message.content;
 
     // Guardar la conversación en la base de datos
     const conversation = new Conversation({
-      userId,
       prompt,
       response,
     });
