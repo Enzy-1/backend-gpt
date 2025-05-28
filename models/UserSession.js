@@ -1,14 +1,19 @@
-import mongoose from 'mongoose';
+const mongoose = require('mongoose');
+
+const messageSchema = new mongoose.Schema({
+  role: { type: String, enum: ['user', 'assistant', 'system'], required: true },
+  content: { type: String, required: true }
+}, { _id: false });
 
 const userSessionSchema = new mongoose.Schema({
-  userId: { type: String, required: true, unique: true }, // Por ejemplo, número de WhatsApp, email o UUID
-  step: { type: Number, default: 1 }, // Paso actual del flujo (1 a 4)
-  nombre: String,
-  edad: Number,
-  genero: String,
-  tipoCita: String,
-  perfilElegido: String,
-  lastInteraction: { type: Date, default: Date.now }
+  userId: { type: String, required: true, unique: true },
+  messages: [messageSchema],
+  updatedAt: { type: Date, default: Date.now }
 });
 
-export default mongoose.model('UserSession', userSessionSchema);
+userSessionSchema.pre('save', function(next) {
+  this.updatedAt = Date.now();
+  next();
+});
+
+module.exports = mongoose.model('UserSession', userSessionSchema);

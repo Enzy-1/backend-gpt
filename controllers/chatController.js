@@ -5,21 +5,18 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Configurar OpenAI con manejo de errores mejorado
+// Inicializar OpenAI
 let openai;
 try {
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error('La variable de entorno OPENAI_API_KEY no está definida')
-  }
-
+  if (!apiKey) throw new Error('La variable de entorno OPENAI_API_KEY no está definida');
   openai = new OpenAI({ apiKey });
   console.log('✅ OpenAI configurado correctamente');
 } catch (error) {
   console.error('Error al inicializar OpenAI:', error);
 }
 
-// Generar respuesta de ChatGPT
+// Generar respuesta de ChatGPT con contexto y pasos
 export const generateChatResponse = async (req, res) => {
   try {
     const { prompt, userId } = req.body;
@@ -29,58 +26,58 @@ export const generateChatResponse = async (req, res) => {
     }
 
     if (!openai) {
-      return res.status(500).json({ error: 'OpenAI no configurado' });
+      return res.status(500).json({ error: 'OpenAI no está configurado correctamente' });
     }
 
-    // Buscar o crear sesión del usuario
+    // 1. Buscar o crear sesión
     let session = await UserSession.findOne({ userId });
     if (!session) {
-      session = new UserSession({ userId });
-      await session.save();
+      session = new UserSession({
+        userId,
+        step: 1,
+        messages: [
+          {
+            role: "system",
+            content: `🎀 Nombre del agente: Clara
+Rol: Asistente virtual para agendar citas románticas.
+El usuario está en el paso 1. Responde según ese paso y nunca reinicies el flujo.
+Nunca vuelvas a saludar si ya lo hiciste.`
+          }
+        ]
+      });
     }
 
-    // Generar mensaje de sistema personalizado con el paso actual
-    const systemMessage = `🎀 Nombre del agente: Clara
-Rol: Asistente virtual para agendar citas románticas.
-El usuario está en el paso ${session.step}. Responde según ese paso y nunca reinicies el flujo.
-Nunca vuelvas a saludar si ya lo hiciste.`;
+    // 2. Agregar el mensaje del usuario al historial
+    session.messages.push({ role: "user", content: prompt });
 
+    // 3. Llamar a OpenAI con el historial completo
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: systemMessage },
-        { role: "user", content: prompt }
-      ],
+      model: "gpt-4o",
+      messages: session.messages,
       max_tokens: 300,
-      temperature: 0.7,
+      temperature: 0.7
     });
 
-    const response = completion.choices[0].message.content;
+    const assistantReply = completion.choices[0].message.content;
 
-      // Actualizar paso si detectas avance lógico (tú puedes implementar esto con detección de contenido o palabras clave)
+    // 4. Agregar la respuesta al historial
+    session.messages.push({ role: "assistant", content: assistantReply });
+
+    // 5. Actualizar el paso automáticamente si aplica
     if (session.step < 4) {
       session.step++;
-      await session.save();
     }
 
-    // Guardar la conversación
-    const conversation = new Conversation({ prompt, response });
+    await session.save(); // guardar todo: historial + paso
+
+    // 6. Guardar en colección general de conversaciones
+    const conversation = new Conversation({ prompt, response: assistantReply });
     await conversation.save();
 
-    res.json({ response });
+    res.json({ response: assistantReply });
+
   } catch (error) {
     console.error('Error:', error);
     res.status(500).json({ error: 'Error al procesar la solicitud', details: error.message });
-  }
-};
-
-// Obtener historial de conversaciones
-export const getConversationHistory = async (req, res) => {
-  try {
-    const conversations = await Conversation.find().sort({ createdAt: -1 }).limit(10);
-    res.json(conversations);
-  } catch (error) {
-    console.error('Error al obtener el historial:', error);
-    res.status(500).json({ error: 'Error al obtener el historial de conversaciones' });
   }
 };
