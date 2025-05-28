@@ -1,10 +1,20 @@
-// models/Conversation.js
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const conversationSchema = new mongoose.Schema({
-  userId: { type: String, required: true },
-  prompt: String,
-  response: String,
-}, { timestamps: true });
+  prompt: {
+    type: String,
+    required: true
+  },
+  response: {
+    type: String,
+    required: true
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+});
 
-module.exports = mongoose.model('Conversation', conversationSchema);
+const Conversation = mongoose.model('Conversation', conversationSchema);
+
+export default Conversation;
