@@ -104,9 +104,9 @@ export const generateChatResponse = async (req, res) => {
     }
 
     if (!openai) {
-      return res.status(500).json({ 
+      return res.status(500).json({
         error: 'No se ha configurado correctamente la API de OpenAI',
-        message: 'Error interno del servidor al configurar OpenAI'
+        message: 'Error interno del servidor al configurar OpenAI',
       });
     }
 
@@ -114,7 +114,7 @@ export const generateChatResponse = async (req, res) => {
     let conversation = await Conversation.findOne({ userId });
 
     if (!conversation) {
-      // Crear nueva conversación con mensaje system al inicio
+      // Crear nueva conversación con mensaje de sistema inicial
       conversation = new Conversation({
         userId,
         messages: [
@@ -124,17 +124,50 @@ export const generateChatResponse = async (req, res) => {
           },
         ],
       });
+      await conversation.save();
     }
 
     // Agregar nuevo mensaje del usuario
     conversation.messages.push({ role: 'user', content: prompt });
 
-    // Mantener solo últimos 10 mensajes para no saturar la petición
-    const messagesToSend = conversation.messages.slice(-10);
+    // Separar mensaje system del resto
+    const systemMessage = conversation.messages.find(m => m.role === 'system');
+    const userAssistantMessages = conversation.messages.filter(m => m.role !== 'system');
 
-    // Llamar a OpenAI con el contexto completo
+    // Mantener últimos 9 mensajes + 1 de system (máximo 10)
+    const lastMessages = userAssistantMessages.slice(-9);
+
+    // Buscar resumen con datos clave (nombre, edad, etc.)
+    let resumenMemoria = '';
+    for (let msg of conversation.messages) {
+      if (
+        msg.role === 'assistant' &&
+        msg.content.includes('Nombre:') &&
+        msg.content.includes('Edad:')
+      ) {
+        resumenMemoria = msg.content;
+        break;
+      }
+    }
+
+    // Insertar recordatorio si hay resumen
+    const memoryReminder = resumenMemoria
+      ? {
+          role: 'system',
+          content: `🧠 Recordatorio para Clara: Esta es la información ya proporcionada por el usuario:\n${resumenMemoria}`,
+        }
+      : null;
+
+    // Preparar mensajes para enviar al modelo
+    const messagesToSend = [
+      systemMessage,
+      ...(memoryReminder ? [memoryReminder] : []),
+      ...lastMessages,
+    ];
+
+    // Llamar a OpenAI
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4o-mini', // Puedes usar 'gpt-4' si tienes acceso y lo prefieres
       messages: messagesToSend,
       max_tokens: 300,
       temperature: 0.7,
@@ -145,7 +178,7 @@ export const generateChatResponse = async (req, res) => {
     // Agregar respuesta al historial
     conversation.messages.push({ role: 'assistant', content: response });
 
-    // Guardar conversación actualizada
+    // Guardar conversación
     await conversation.save();
 
     res.json({ response });
@@ -157,6 +190,7 @@ export const generateChatResponse = async (req, res) => {
     });
   }
 };
+
 
 // Obtener historial simple (opcional)
 export const getConversationHistory = async (req, res) => {
